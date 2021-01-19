@@ -1013,7 +1013,18 @@ export class GitLabProvider extends ThirdPartyIssueProviderBase<CSGitLabProvider
 		return response;
 	}
 
-	_pullRequestCache: Map<string, any> = new Map();
+	_pullRequestCache: Map<
+		string,
+		{
+			project: {
+				name: string;
+				mergeRequest: {
+					id: string;
+					iid: string;
+				};
+			};
+		}
+	> = new Map();
 
 	@log()
 	async getPullRequest(request: any): Promise<any> {
@@ -1156,7 +1167,7 @@ export class GitLabProvider extends ThirdPartyIssueProviderBase<CSGitLabProvider
 			// 	);
 			// } while (timelineQueryResponse.repository.pullRequest.timelineItems.pageInfo.hasNextPage);
 
-			const response = await this.query(q, {
+			response = await this.query(q, {
 				fullPath: request.projectFullPath,
 				iid: request.iid.toString()
 			});
@@ -1178,11 +1189,13 @@ export class GitLabProvider extends ThirdPartyIssueProviderBase<CSGitLabProvider
 				response.project.mergeRequest.repository.nameWithOwner +
 				"!" +
 				response.project.mergeRequest.iid;
-
-			return response;
+			this._pullRequestCache.set(request.pullRequestId, response);
 		} catch (ex) {
 			Logger.error(ex);
 		}
+
+		return response;
+
 		// if (response?.repository?.pullRequest) {
 		// 	const { repos } = SessionContainer.instance();
 		// 	const prRepo = await this.getPullRequestRepo(
@@ -1212,16 +1225,24 @@ export class GitLabProvider extends ThirdPartyIssueProviderBase<CSGitLabProvider
 		// 	response.repository.resourcePath,
 		// 	""
 		// );
-
-		this._pullRequestCache.set(request.pullRequestId, response);
-		return response;
 	}
 
 	@log()
 	async createPullRequestComment(request: {
 		pullRequestId: string;
 		text: string;
+		noteableId?: string;
+		projectFullPath?: string;
+		iid?: string;
 	}): Promise<Directives> {
+		if (request.pullRequestId.indexOf("!") > -1) {
+			request.projectFullPath = request.pullRequestId.split("!")[0];
+			request.iid = request.pullRequestId.split("!")[1];
+		}
+		request.noteableId = `gid://gitlab/MergeRequest/${
+			this._pullRequestCache.get(request.pullRequestId)?.project.mergeRequest.id.split("!")[1]
+		}`;
+
 		const response = (await this.mutate(
 			`mutation CreateNote($noteableId:ID!, $body:String!, $iid:String!){
 			createNote(input: {noteableId:$noteableId, body:$body}){
@@ -1313,9 +1334,9 @@ export class GitLabProvider extends ThirdPartyIssueProviderBase<CSGitLabProvider
 			}
 		  }`,
 			{
-				noteableId: `gid://gitlab/MergeRequest/${request.pullRequestId}`,
+				noteableId: request.noteableId,
 				body: request.text,
-				iid: "3"
+				iid: request.iid!.toString()
 			}
 		)) as any;
 
