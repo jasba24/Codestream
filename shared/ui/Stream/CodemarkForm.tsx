@@ -11,20 +11,16 @@ import {
 	GetReviewRequestType,
 	BlameAuthor,
 	GetShaDiffsRangesRequestType,
-	GetShaDiffsRangesResponse,
-	UploadFileRequest,
-	UploadFileRequestType
+	GetShaDiffsRangesResponse
 } from "@codestream/protocols/agent";
 import {
 	CodemarkType,
 	CSChannelStream,
 	CSCodemark,
-	CSDirectStream,
 	CSStream,
 	CSUser,
 	StreamType,
-	CSMe,
-	Attachment
+	CSMe
 } from "@codestream/protocols/api";
 import cx from "classnames";
 import * as paths from "path-browserify";
@@ -45,25 +41,23 @@ import {
 	keyFilter,
 	safe
 } from "../utils";
-import { HostApi, Server } from "../webview-api";
+import { HostApi } from "../webview-api";
 import Button from "./Button";
 import CrossPostIssueControls from "./CrossPostIssueControls";
 import Tag from "./Tag";
 import Icon from "./Icon";
 import Menu from "./Menu";
 import Tooltip from "./Tooltip";
-import { sortBy as _sortBy, sortBy } from "lodash-es";
 import {
 	EditorSelectRangeRequestType,
 	EditorSelection,
 	EditorHighlightRangeRequestType,
-	WebviewPanels,
-	WebviewModals
+	WebviewPanels
 } from "@codestream/protocols/webview";
 import { getCurrentSelection } from "../store/editorContext/reducer";
 import Headshot from "./Headshot";
 import { getTeamMembers, getTeamTagsArray, getTeamMates } from "../store/users/reducer";
-import MessageInput from "./MessageInput";
+import MessageInput, { AttachmentField } from "./MessageInput";
 import { getCurrentTeamProvider } from "../store/teams/reducer";
 import { getCodemark } from "../store/codemarks/reducer";
 import { CodemarksState } from "../store/codemarks/types";
@@ -89,8 +83,6 @@ import CancelButton from "./CancelButton";
 import { VideoLink } from "./Flow";
 import { PanelHeader } from "../src/components/PanelHeader";
 import { ReposState } from "../store/repos/types";
-import * as path from "path-browserify";
-import { isOnPrem } from "../store/configs/reducer";
 import { getDocumentFromMarker } from "./api-functions";
 
 export interface ICrossPostIssueContext {
@@ -105,11 +97,6 @@ export const CrossPostIssueContext = React.createContext<ICrossPostIssueContext>
 	setSelectedAssignees: () => {},
 	setValues: () => {}
 });
-
-export interface AttachmentField extends Attachment {
-	status?: "uploading" | "error" | "uploaded";
-	error?: string;
-}
 
 interface Props extends ConnectedProps {
 	streamId: string;
@@ -1122,10 +1109,6 @@ class CodemarkForm extends React.Component<Props, State> {
 		this.insertTextAtCursor && this.insertTextAtCursor(`[#${index + 1}]`);
 	};
 
-	pinImage = (filename: string, url: string, event?: React.SyntheticEvent) => {
-		this.insertTextAtCursor && this.insertTextAtCursor(`![${filename}](${url})`);
-	};
-
 	selectLocation = (action: "add" | "edit" | "delete") => {
 		this.setState({ locationMenuOpen: "closed" });
 	};
@@ -1305,62 +1288,6 @@ class CodemarkForm extends React.Component<Props, State> {
 		);
 	};
 
-	renderAttachedFiles = () => {
-		const { attachments } = this.state;
-
-		if (!attachments || attachments.length === 0) return;
-		return (
-			<div className="related" key="attached-files">
-				<div className="related-label">Attachments</div>
-				{attachments.map((file, index) => {
-					const icon =
-						file.status === "uploading" ? (
-							<Icon name="sync" className="spin" style={{ verticalAlign: "3px" }} />
-						) : file.status === "error" ? (
-							<Icon name="alert" className="spinnable" />
-						) : (
-							<Icon name="paperclip" className="spinnable" />
-						);
-					const isImage = (file.mimetype || "").startsWith("image");
-					const imageInjected =
-						isImage && file.url ? this.state.text.includes(`![${file.name}](${file.url})`) : false;
-					return (
-						<Tooltip title={file.error} placement="top" delay={1}>
-							<div key={index} className="attachment">
-								<span>{icon}</span>
-								<span>{file.name}</span>
-								<span>
-									{isImage && file.url && (
-										<Icon
-											title={
-												imageInjected
-													? `This image is in the markdown above`
-													: `Insert this image in markdown`
-											}
-											placement="bottomRight"
-											name="pin"
-											className={imageInjected ? "clickable selected" : "clickable"}
-											onMouseDown={e => this.pinImage(file.name, file.url!, e)}
-										/>
-									)}
-									<Icon
-										name="x"
-										className="clickable"
-										onClick={() => {
-											const attachments = [...this.state.attachments];
-											attachments.splice(index, 1);
-											this.setState({ attachments });
-										}}
-									/>
-								</span>
-							</div>
-						</Tooltip>
-					);
-				})}
-			</div>
-		);
-	};
-
 	handleKeyPress = (event: React.KeyboardEvent) => {
 		if (event.key == "Enter") return this.switchChannel(event);
 	};
@@ -1401,70 +1328,6 @@ class CodemarkForm extends React.Component<Props, State> {
 			});
 		}
 		this.setState({ relatedCodemarkIds });
-	};
-
-	handlePaste = e => {
-		if (!e.clipboardData || !e.clipboardData.files) return;
-
-		this.handleAttachFiles(e.clipboardData.files);
-	};
-
-	replaceAttachment = (attachment, index) => {
-		attachment = { ...attachment, mimetype: attachment.type || attachment.mimetype };
-		const { attachments } = this.state;
-		let newAttachments = [...attachments];
-		newAttachments.splice(index, 1, attachment);
-		this.setState({ attachments: newAttachments });
-	};
-
-	handleAttachFiles = async files => {
-		if (!files || files.length === 0) return;
-
-		const { attachments } = this.state;
-		let index = attachments.length;
-
-		HostApi.instance.track("File Attached", {});
-
-		[...files].forEach(file => {
-			file.status = "uploading";
-		});
-		// add the dropped files to the list of attachments, with uploading state
-		this.setState({ attachments: [...attachments, ...files] });
-
-		for (const file of files) {
-			try {
-				const request: UploadFileRequest = {
-					path: file.path,
-					name: file.name,
-					size: file.size,
-					mimetype: file.type
-				};
-				if (!file.path) {
-					// encode as base64 to send to the agent
-					const toBase64 = file =>
-						new Promise((resolve, reject) => {
-							const reader = new FileReader();
-							reader.readAsDataURL(file);
-							reader.onload = () => resolve(reader.result);
-							reader.onerror = error => reject(error);
-						});
-					request.buffer = await toBase64(file);
-				}
-				const response = await HostApi.instance.send(UploadFileRequestType, request);
-				if (response && response.url) {
-					this.replaceAttachment(response, index);
-				} else {
-					file.status = "error";
-					this.replaceAttachment(file, index);
-				}
-			} catch (e) {
-				console.warn("Error uploading file: ", e);
-				file.status = "error";
-				file.error = e;
-				this.replaceAttachment(file, index);
-			}
-			index++;
-		}
 	};
 
 	handleChangeRelated = codemarkIds => {
@@ -1704,12 +1567,14 @@ class CodemarkForm extends React.Component<Props, State> {
 				setIsPreviewing={isPreviewing => this.setState({ isPreviewing })}
 				renderCodeBlock={this.renderCodeBlock}
 				renderCodeBlocks={this.renderCodeBlocks}
-				attachFiles={this.handleAttachFiles}
+				attachments={this.state.attachments}
+				setAttachments={this.setAttachments}
 				__onDidRender={__onDidRender}
-				onPaste={this.handlePaste}
 			/>
 		);
 	};
+
+	setAttachments = (attachments: AttachmentField[]) => this.setState({ attachments });
 
 	copyPermalink = (event: React.SyntheticEvent) => {
 		event.preventDefault();
@@ -2245,9 +2110,7 @@ class CodemarkForm extends React.Component<Props, State> {
 
 	handleDragEnter = () => this.setState({ isDragging: this.state.isDragging + 1 });
 	handleDragLeave = () => this.setState({ isDragging: this.state.isDragging - 1 });
-	handleDrop = () => {
-		this.setState({ isDragging: 0 });
-	};
+	handleDrop = () => this.setState({ isDragging: 0 });
 
 	renderCodemarkForm() {
 		const { editingCodemark, currentUser } = this.props;
@@ -2471,7 +2334,6 @@ class CodemarkForm extends React.Component<Props, State> {
 					)}
 					<div style={{ clear: "both" }} />
 					{/* this.renderPrivacyControls() */}
-					{this.renderAttachedFiles()}
 					{this.renderRelatedCodemarks()}
 					{this.renderTags()}
 					{!this.state.isPreviewing && this.renderCodeBlocks()}
