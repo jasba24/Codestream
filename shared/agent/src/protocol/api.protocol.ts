@@ -553,6 +553,7 @@ export interface CSCreateReviewRequest {
 	externalProviderUrl?: string;
 	externalProviderHost?: string;
 	remoteCodeUrl?: { name: string; url: string };
+	files?: Attachment[];
 	// threadUrl?: string;
 }
 

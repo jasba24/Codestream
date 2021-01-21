@@ -51,7 +51,7 @@ import { Headshot } from "@codestream/webview/src/components/Headshot";
 import HeadshotMenu from "@codestream/webview/src/components/HeadshotMenu";
 import { SelectPeople } from "@codestream/webview/src/components/SelectPeople";
 import { getTeamMembers, getTeamTagsArray, getTeamMates } from "../store/users/reducer";
-import MessageInput from "./MessageInput";
+import MessageInput, { AttachmentField } from "./MessageInput";
 import {
 	openPanel,
 	openModal,
@@ -225,6 +225,8 @@ interface State {
 	currentFile?: string;
 	editingReviewBranch?: string;
 	addressesIssues: { [codemarkId: string]: boolean };
+	attachments: AttachmentField[];
+	isDragging: number;
 }
 
 function merge(defaults: Partial<State>, review: CSReview): State {
@@ -278,7 +280,9 @@ class ReviewForm extends React.Component<Props, State> {
 			commitListLength: 10,
 			allReviewersMustApprove: false,
 			currentFile: "",
-			addressesIssues: {}
+			addressesIssues: {},
+			attachments: [],
+			isDragging: 0
 		};
 
 		const state = props.editingReview
@@ -742,7 +746,8 @@ class ReviewForm extends React.Component<Props, State> {
 			allReviewersMustApprove,
 			includeSaved,
 			includeStaged,
-			reviewerEmails
+			reviewerEmails,
+			attachments
 		} = this.state;
 
 		// FIXME first, process the email-only reviewers
@@ -870,7 +875,8 @@ class ReviewForm extends React.Component<Props, State> {
 							includeStaged: includeStaged && scm!.stagedFiles.length > 0,
 							checkpoint: 0
 						}
-					]
+					],
+					files: attachments
 				} as any;
 
 				const { type: createResult } = await this.props.createPostAndReview(
@@ -934,6 +940,8 @@ class ReviewForm extends React.Component<Props, State> {
 			this.props.setNewPostEntry(undefined);
 		}
 	};
+
+	setAttachments = (attachments: AttachmentField[]) => this.setState({ attachments });
 
 	isFormInvalid = () => {
 		const { text, title } = this.state;
@@ -1122,6 +1130,8 @@ class ReviewForm extends React.Component<Props, State> {
 				selectedTags={this.state.selectedTags}
 				__onDidRender={__onDidRender}
 				autoFocus={isAmending ? true : false}
+				attachments={this.state.attachments}
+				setAttachments={this.setAttachments}
 			/>
 		);
 	};
